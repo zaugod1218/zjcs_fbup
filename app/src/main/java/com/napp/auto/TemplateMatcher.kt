@@ -38,6 +38,9 @@ class TemplateMatcher(private val templateDir: File) {
         scaledTemplate.getPixels(tPixels, 0, tw, 0, 0, tw, th)
         val tMean = tPixels.map { it and 0xFF }.average().toFloat()
         val tNorm = tPixels.map { (it and 0xFF) - tMean }.toFloatArray()
+        var normTotal = 0f
+        for (v in tNorm) normTotal += v * v
+        val tNormFactor = Math.sqrt(normTotal.toDouble()).toFloat()
 
         var bestVal = -1f
         var bestX = 0
@@ -60,11 +63,10 @@ class TemplateMatcher(private val templateDir: File) {
                         sum += sVal * tNorm[ty * tw + tx]
                     }
                 }
-                val norm = Math.sqrt((0 until tw * th).sumOf { tNorm[it] * tNorm[it] }.toDouble()).toFloat()
-                val val = if (norm > 0) sum / norm else 0f
+                val corr = if (tNormFactor > 0) sum / tNormFactor else 0f
 
-                if (val > bestVal) {
-                    bestVal = val
+                if (corr > bestVal) {
+                    bestVal = corr
                     bestX = x
                     bestY = y
                 }
