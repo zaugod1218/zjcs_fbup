@@ -41,7 +41,11 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK) {
             resultCode = result.resultCode
             projectionData = result.data
-            startService()
+            if (isCapturing) {
+                captureNextTemplate()
+            } else {
+                startService()
+            }
         } else {
             Toast.makeText(this, "需要截屏权限才能运行", Toast.LENGTH_LONG).show()
         }
@@ -133,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (resultCode == -1) {
             Toast.makeText(this, "请先授权截屏", Toast.LENGTH_SHORT).show()
+            isCapturing = true
             requestScreenCapture()
             return
         }
