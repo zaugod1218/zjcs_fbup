@@ -191,12 +191,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun isAccessibilityEnabled(): Boolean {
         try {
-            val service = "${packageName}/.TapService"
             val enabledServices = Settings.Secure.getString(
                 contentResolver,
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            )
-            return enabledServices?.contains(service) == true
+            ) ?: return false
+            // 兼容 MIUI/HyperOS 使用完整类路径格式
+            val shortForm = "$packageName/.TapService"
+            val fullForm = "$packageName/$packageName.TapService"
+            return enabledServices.contains(shortForm) || enabledServices.contains(fullForm)
         } catch (_: Exception) {
             return false
         }
