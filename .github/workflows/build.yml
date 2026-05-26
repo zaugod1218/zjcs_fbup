@@ -17,16 +17,11 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
-      - name: Download Gradle Wrapper
+      - name: Build APK with Gradle
         run: |
-          curl -sL "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -o gradle-8.5-bin.zip
-          unzip -q gradle-8.5-bin.zip
-          GRADLE_HOME=$PWD/gradle-8.5
-          $GRADLE_HOME/bin/gradle wrapper --gradle-version 8.5
-          rm -rf gradle-8.5*
-
-      - name: Build APK
-        run: ./gradlew assembleDebug
+          curl -sL "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -o gradle.zip
+          unzip -q gradle.zip
+          gradle-8.5/bin/gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
