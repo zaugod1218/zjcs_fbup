@@ -83,7 +83,7 @@ class AutoService : Service() {
                         currentState = BotState.BATTLING
                     } else {
                         failures++
-                        updateStatus("匹配失败 ($failures/$MAX_FAILURES)")
+                        updateStatus("匹配失败 ($failures/${Config.MAX_FAILURES})")
                         currentState = BotState.NAVIGATE
                     }
 
