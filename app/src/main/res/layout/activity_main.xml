@@ -54,7 +54,7 @@
         android:layout_height="48dp"
         android:text="采集模板"
         android:textSize="16sp"
-        style="@style/Widget.Material3.Button.Tonal" />
+        android:backgroundTint="#6200EE" />
 
     <TextView
         android:layout_width="wrap_content"
