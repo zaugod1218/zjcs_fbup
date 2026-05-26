@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +16,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import java.io.File
+import java.io.FileOutputStream
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,11 +27,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var setupBtn: Button
     private var isCapturing = false
     private var captureIndex = 0
-    private var pendingTemplateName: String? = null
 
     private var resultCode = -1
     private var projectionData: Intent? = null
     private var serviceBound = false
+    private var floatingView: FloatingCaptureView? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {}
@@ -42,12 +45,25 @@ class MainActivity : AppCompatActivity() {
             resultCode = result.resultCode
             projectionData = result.data
             if (isCapturing) {
-                captureNextTemplate()
+                captureIndex = 0
+                showFloatingView()
             } else {
                 startService()
             }
         } else {
             Toast.makeText(this, "需要截屏权限才能运行", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val cropResultLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            advanceToNextTemplate()
+        } else {
+            if (isCapturing && captureIndex < Config.TEMPLATE_NAMES.size) {
+                showFloatingView()
+            }
         }
     }
 
@@ -75,7 +91,6 @@ class MainActivity : AppCompatActivity() {
 
         setupBtn.setOnClickListener { startTemplateCapture() }
 
-        // 检查无障碍服务是否开启
         if (!isAccessibilityEnabled()) {
             AlertDialog.Builder(this)
                 .setTitle("需要无障碍服务")
@@ -88,13 +103,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        // 自动截屏模式
-        if (isCapturing && pendingTemplateName != null) {
-            captureTemplate(pendingTemplateName!!)
-            pendingTemplateName = null
+    override fun onDestroy() {
+        floatingView?.dismiss()
+        if (serviceBound) {
+            try { unbindService(connection) } catch (_: Exception) {}
         }
+        super.onDestroy()
     }
 
     private fun checkPermissions() {
@@ -135,6 +149,24 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             return
         }
+
+        // 检查悬浮窗权限（在游戏上方显示截图按钮）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("需要悬浮窗权限")
+                .setMessage("需要在游戏上方显示截图按钮，请开启「显示悬浮窗」权限")
+                .setPositiveButton("去设置") { _, _ ->
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                    startActivity(intent)
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            return
+        }
+
         if (resultCode == -1) {
             Toast.makeText(this, "请先授权截屏", Toast.LENGTH_SHORT).show()
             isCapturing = true
@@ -143,55 +175,76 @@ class MainActivity : AppCompatActivity() {
         }
 
         captureIndex = 0
-        captureNextTemplate()
+        showFloatingView()
     }
 
-    private fun captureNextTemplate() {
+    private fun showFloatingView() {
         if (captureIndex >= Config.TEMPLATE_NAMES.size) {
             Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
+            isCapturing = false
             return
         }
         val name = Config.TEMPLATE_NAMES[captureIndex]
-        isCapturing = true
-        pendingTemplateName = name
-
-        AlertDialog.Builder(this)
-            .setTitle("采集模板 ${captureIndex + 1}/${Config.TEMPLATE_NAMES.size}")
-            .setMessage("请进入游戏，让「$name」按钮显示在屏幕上\n\n点击「截图」后，点击按钮所在位置")
-            .setPositiveButton("截图") { _, _ -> captureTemplate(name) }
-            .setNegativeButton("跳过", null)
-            .show()
+        floatingView = FloatingCaptureView(this)
+        floatingView?.show(
+            templateName = name,
+            index = captureIndex + 1,
+            total = Config.TEMPLATE_NAMES.size,
+            onCapture = { floatingCapture(name) },
+            onSkip = { advanceToNextTemplate() },
+            onFinishAll = {
+                floatingView?.dismiss()
+                floatingView = null
+                isCapturing = false
+                Toast.makeText(this, "模板采集完成！", Toast.LENGTH_LONG).show()
+            }
+        )
     }
 
-    private fun captureTemplate(name: String) {
-        if (resultCode == -1) return
+    private fun floatingCapture(name: String) {
+        floatingView?.dismiss()
+        floatingView = null
 
+        // 截图：游戏仍在最前台，直接截取屏幕
         val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
         val proj = mpm.getMediaProjection(resultCode, projectionData!!)
         val helper = ScreenCaptureHelper(this)
         helper.start(proj)
-        Thread.sleep(500)
-        var bmp = helper.captureScreen()
-        var attempts = 0
-        while (bmp == null && attempts < 5) {
-            Thread.sleep(300)
+        Thread.sleep(300)
+        var bmp: Bitmap? = null
+        for (i in 0..5) {
             bmp = helper.captureScreen()
-            attempts++
+            if (bmp != null) break
+            Thread.sleep(200)
         }
+        helper.stop()
+
         if (bmp == null) {
-            helper.stop()
-            Toast.makeText(this, "截图失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "截图失败，重试", Toast.LENGTH_SHORT).show()
+            showFloatingView()
             return
         }
 
-        // 在新的 Activity 中显示截图让用户点击
+        // 保存到缓存，传给裁剪页面
+        val file = File(cacheDir, "capture_temp.png")
+        FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+        bmp.recycle()
+
         val intent = Intent(this, CropActivity::class.java).apply {
+            putExtra("imagePath", file.absolutePath)
             putExtra("templateName", name)
-            putExtra("resultCode", resultCode)
-            putExtra("data", projectionData)
         }
-        startActivity(intent)
-        helper.stop()
+        cropResultLauncher.launch(intent)
+    }
+
+    private fun advanceToNextTemplate() {
+        captureIndex++
+        if (captureIndex < Config.TEMPLATE_NAMES.size) {
+            showFloatingView()
+        } else {
+            isCapturing = false
+            Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun isAccessibilityEnabled(): Boolean {
@@ -200,19 +253,11 @@ class MainActivity : AppCompatActivity() {
                 contentResolver,
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: return false
-            // 兼容 MIUI/HyperOS 使用完整类路径格式
             val shortForm = "$packageName/.TapService"
             val fullForm = "$packageName/$packageName.TapService"
             return enabledServices.contains(shortForm) || enabledServices.contains(fullForm)
         } catch (_: Exception) {
             return false
         }
-    }
-
-    override fun onDestroy() {
-        if (serviceBound) {
-            try { unbindService(connection) } catch (_: Exception) {}
-        }
-        super.onDestroy()
     }
 }
