@@ -1,13 +1,10 @@
 package com.napp.auto
 
 import android.app.AlertDialog
-import android.app.Notification
-import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,8 +15,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import java.io.File
-import java.io.FileOutputStream
 
 class MainActivity : AppCompatActivity() {
 
@@ -40,7 +35,6 @@ class MainActivity : AppCompatActivity() {
     private var projectionData: Intent? = null
     private var serviceBound = false
     private var floatingView: FloatingCaptureView? = null
-    private var captureHelper: ScreenCaptureHelper? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {}
@@ -123,7 +117,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         floatingView?.dismiss()
-        stopCaptureHelper()
+        stopCaptureService()
         if (serviceBound) {
             try { unbindService(connection) } catch (_: Exception) {}
         }
@@ -195,17 +189,13 @@ class MainActivity : AppCompatActivity() {
 
         captureIndex = 0
 
-        // 提前启动截屏（App 在前台，确保 MediaProjection 有效）
-        try {
-            val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-            val proj = mpm.getMediaProjection(resultCode, projectionData!!)
-            captureHelper = ScreenCaptureHelper(this)
-            captureHelper?.start(proj)
-        } catch (e: Exception) {
-            android.util.Log.e(Config.TAG, "启动截屏失败", e)
-            Toast.makeText(this, "启动截屏失败: ${e.message}", Toast.LENGTH_SHORT).show()
-            return
+        // 后台服务保持截屏（MIUI 不会暂停 Service 的 VirtualDisplay）
+        val initIntent = Intent(this, CaptureService::class.java).apply {
+            action = "INIT"
+            putExtra("resultCode", resultCode)
+            putExtra("data", projectionData)
         }
+        startForegroundService(initIntent)
 
         showFloatingView()
     }
@@ -227,7 +217,7 @@ class MainActivity : AppCompatActivity() {
             onFinishAll = {
                 floatingView?.dismiss()
                 floatingView = null
-                stopCaptureHelper()
+                stopCaptureService()
                 isCapturing = false
                 Toast.makeText(this, "模板采集完成！", Toast.LENGTH_LONG).show()
             }
@@ -238,53 +228,17 @@ class MainActivity : AppCompatActivity() {
         floatingView?.dismiss()
         floatingView = null
 
-        Thread {
-            try {
-                var bmp: Bitmap? = null
-                for (i in 0..10) {
-                    bmp = captureHelper?.captureScreen()
-                    if (bmp != null) break
-                    Thread.sleep(300)
-                }
-
-                if (bmp != null) {
-                    val file = File(cacheDir, "capture_temp.png")
-                    FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
-                    bmp.recycle()
-
-                    pendingCropName = name
-                    pendingCropPath = file.absolutePath
-                    showCaptureNotification()
-                } else {
-                    runOnUiThread {
-                        Toast.makeText(this@MainActivity, "截图失败（无法获取画面）", Toast.LENGTH_SHORT).show()
-                        showFloatingView()
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e(Config.TAG, "截图失败", e)
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "截图失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                    showFloatingView()
-                }
-            }
-        }.start()
+        // CaptureService 在前台服务中截图，不会被 MIUI 暂停
+        val intent = Intent(this, CaptureService::class.java).apply {
+            action = "CAPTURE"
+            putExtra("name", name)
+        }
+        startService(intent)
     }
 
-    private fun showCaptureNotification() {
-        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        val notification = Notification.Builder(this, "napp_auto")
-            .setContentTitle("截图完成")
-            .setContentText("返回 NappAuto 选择按钮位置")
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setAutoCancel(true)
-            .build()
-        nm.notify(1002, notification)
-    }
-
-    private fun stopCaptureHelper() {
-        try { captureHelper?.stop() } catch (_: Exception) {}
-        captureHelper = null
+    private fun stopCaptureService() {
+        val intent = Intent(this, CaptureService::class.java).apply { action = "STOP" }
+        try { startService(intent) } catch (_: Exception) {}
     }
 
     private fun advanceToNextTemplate() {
@@ -292,7 +246,7 @@ class MainActivity : AppCompatActivity() {
         if (captureIndex < Config.TEMPLATE_NAMES.size) {
             showFloatingView()
         } else {
-            stopCaptureHelper()
+            stopCaptureService()
             isCapturing = false
             Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
         }
