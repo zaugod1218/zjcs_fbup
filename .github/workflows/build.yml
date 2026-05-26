@@ -43,7 +43,7 @@ jobs:
       - name: Build APK with Gradle
         run: |
           ./gradlew assembleDebug --info --no-daemon 2>&1 | tee build.log
-          echo "EXIT_CODE=$?" >> $GITHUB_ENV
+          exit ${PIPESTATUS[0]}
 
       - name: List outputs
         if: always()
