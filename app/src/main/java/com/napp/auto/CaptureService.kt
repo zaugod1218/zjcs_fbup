@@ -46,7 +46,8 @@ class CaptureService : Service() {
                 }
             }
             "CAPTURE" -> {
-                captureTemplate(intent.getStringExtra("name") ?: return START_STICKY)
+                val name = intent.getStringExtra("name") ?: return START_STICKY
+                Thread { captureTemplate(name) }.start()
             }
             "STOP" -> {
                 screenCapture?.stop()
@@ -78,6 +79,14 @@ class CaptureService : Service() {
             nm.notify(1003, Notification.Builder(this, "napp_auto")
                 .setContentTitle("截图完成")
                 .setContentText("返回 NappAuto 选择按钮位置")
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setAutoCancel(true)
+                .build())
+        } else {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(1003, Notification.Builder(this, "napp_auto")
+                .setContentTitle("截图失败")
+                .setContentText("无法获取画面，请重试")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setAutoCancel(true)
                 .build())
