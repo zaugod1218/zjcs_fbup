@@ -17,39 +17,52 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
-      - name: Build APK with Gradle
+      - name: Debug environment
+        run: |
+          echo "PWD: $(pwd)"
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+          ls -la
+          echo "--- Listing project files ---"
+          find . -name "build.gradle.kts" -o -name "settings.gradle.kts" | head -10
+          echo "--- SDK check ---"
+          if [ -d "$ANDROID_HOME" ]; then
+            ls "$ANDROID_HOME/platforms/" 2>/dev/null || echo "No platforms dir"
+            ls "$ANDROID_HOME/build-tools/" 2>/dev/null || echo "No build-tools dir"
+          else
+            echo "ANDROID_HOME not set or not found"
+          fi
+
+      - name: Generate Gradle wrapper
         run: |
           curl -sL "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -o gradle.zip
           unzip -q gradle.zip
-          gradle-8.5/bin/gradle assembleDebug --stacktrace 2>&1 | tee build.log
+          gradle-8.5/bin/gradle wrapper --gradle-version 8.5
+          ./gradlew --version
 
-      - name: Upload Build Log (even on failure)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
+      - name: Build APK with Gradle
+        run: |
+          ./gradlew assembleDebug --info --no-daemon 2>&1 | tee build.log
+          echo "EXIT_CODE=$?" >> $GITHUB_ENV
 
-      - name: List build outputs
+      - name: List outputs
         if: always()
         run: |
-          echo "=== APK files ===" > build-report.txt
-          find . -name "*.apk" -type f 2>/dev/null >> build-report.txt || true
-          echo "=== Build output files ===" >> build-report.txt
-          find app/build -type f 2>/dev/null | head -100 >> build-report.txt || true
-          wc -l < build-report.txt
+          echo "=== APK search ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found"
+          echo "=== Build outputs ==="
+          find app/build -type f 2>/dev/null | head -100 || echo "No build outputs"
+          echo "=== Size of build.log ==="
+          wc -c build.log 2>/dev/null || echo "No build.log"
+          echo "=== Last 50 lines of build.log ==="
+          tail -50 build.log 2>/dev/null || echo "Cannot read build.log"
 
-      - name: Upload Report
+      - name: Upload Build Output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-report
-          path: build-report.txt
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: "**/*.apk"
+          name: build-output
+          path: |
+            build.log
+            app/build/outputs/
           if-no-files-found: warn
