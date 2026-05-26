@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -29,12 +28,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var startBtn: Button
     private lateinit var setupBtn: Button
     private var isCapturing = false
-    private var captureIndex = 0
 
     private var resultCode = -1
     private var projectionData: Intent? = null
     private var serviceBound = false
-    private var floatingView: FloatingCaptureView? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {}
@@ -48,8 +45,7 @@ class MainActivity : AppCompatActivity() {
             resultCode = result.resultCode
             projectionData = result.data
             if (isCapturing) {
-                captureIndex = 0
-                showFloatingView()
+                beginCaptureSession()
             } else {
                 startService()
             }
@@ -96,10 +92,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 从 CropActivity 返回，模板已保存
+        // 从 CropActivity 返回，模板已保存 — 通知 CaptureService 进入下一个
         if (templateJustSaved) {
             templateJustSaved = false
-            advanceToNextTemplate()
+            try { startService(Intent(this, CaptureService::class.java).apply { action = "NEXT" }) } catch (_: Exception) {}
             return
         }
         // 有等待裁剪的截图（用户手动回到 App）
@@ -116,7 +112,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        floatingView?.dismiss()
         stopCaptureService()
         if (serviceBound) {
             try { unbindService(connection) } catch (_: Exception) {}
@@ -163,23 +158,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // 悬浮窗权限
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            AlertDialog.Builder(this)
-                .setTitle("需要悬浮窗权限")
-                .setMessage("需要在游戏上方显示截图按钮，请开启「显示悬浮窗」权限")
-                .setPositiveButton("去设置") { _, _ ->
-                    val intent = Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:$packageName")
-                    )
-                    startActivity(intent)
-                }
-                .setNegativeButton("取消", null)
-                .show()
-            return
-        }
-
         if (resultCode == -1) {
             Toast.makeText(this, "请先授权截屏", Toast.LENGTH_SHORT).show()
             isCapturing = true
@@ -187,9 +165,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        captureIndex = 0
+        beginCaptureSession()
+    }
 
-        // 后台服务保持截屏（MIUI 不会暂停 Service 的 VirtualDisplay）
+    private fun beginCaptureSession() {
         val initIntent = Intent(this, CaptureService::class.java).apply {
             action = "INIT"
             putExtra("resultCode", resultCode)
@@ -197,59 +176,14 @@ class MainActivity : AppCompatActivity() {
         }
         startForegroundService(initIntent)
 
-        showFloatingView()
-    }
+        startService(Intent(this, CaptureService::class.java).apply { action = "START_CAPTURE" })
 
-    private fun showFloatingView() {
-        if (captureIndex >= Config.TEMPLATE_NAMES.size) {
-            isCapturing = false
-            Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
-            return
-        }
-        val name = Config.TEMPLATE_NAMES[captureIndex]
-        floatingView = FloatingCaptureView(this)
-        floatingView?.show(
-            templateName = name,
-            index = captureIndex + 1,
-            total = Config.TEMPLATE_NAMES.size,
-            onCapture = { floatingCapture(name) },
-            onSkip = { advanceToNextTemplate() },
-            onFinishAll = {
-                floatingView?.dismiss()
-                floatingView = null
-                stopCaptureService()
-                isCapturing = false
-                Toast.makeText(this, "模板采集完成！", Toast.LENGTH_LONG).show()
-            }
-        )
-    }
-
-    private fun floatingCapture(name: String) {
-        floatingView?.dismiss()
-        floatingView = null
-
-        // CaptureService 在前台服务中截图，不会被 MIUI 暂停
-        val intent = Intent(this, CaptureService::class.java).apply {
-            action = "CAPTURE"
-            putExtra("name", name)
-        }
-        startService(intent)
+        Toast.makeText(this, "请在通知栏中操作截图", Toast.LENGTH_LONG).show()
     }
 
     private fun stopCaptureService() {
         val intent = Intent(this, CaptureService::class.java).apply { action = "STOP" }
         try { startService(intent) } catch (_: Exception) {}
-    }
-
-    private fun advanceToNextTemplate() {
-        captureIndex++
-        if (captureIndex < Config.TEMPLATE_NAMES.size) {
-            showFloatingView()
-        } else {
-            stopCaptureService()
-            isCapturing = false
-            Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
-        }
     }
 
     private fun isAccessibilityEnabled(): Boolean {
