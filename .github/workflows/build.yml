@@ -31,10 +31,22 @@ jobs:
           path: build.log
 
       - name: List build outputs
-        if: success()
-        run: find app/build -type f 2>/dev/null | head -50
+        if: always()
+        run: |
+          echo "=== APK files ===" > build-report.txt
+          find . -name "*.apk" -type f 2>/dev/null >> build-report.txt || true
+          echo "=== Build output files ===" >> build-report.txt
+          find app/build -type f 2>/dev/null | head -100 >> build-report.txt || true
+          wc -l < build-report.txt
 
-      - name: Find and Upload APK
+      - name: Upload Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-report
+          path: build-report.txt
+
+      - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
