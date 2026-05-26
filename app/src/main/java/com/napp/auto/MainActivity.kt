@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private var projectionData: Intent? = null
     private var serviceBound = false
     private var floatingView: FloatingCaptureView? = null
+    private var captureHelper: ScreenCaptureHelper? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {}
@@ -122,6 +123,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         floatingView?.dismiss()
+        stopCaptureHelper()
         if (serviceBound) {
             try { unbindService(connection) } catch (_: Exception) {}
         }
@@ -192,6 +194,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         captureIndex = 0
+
+        // 提前启动截屏（App 在前台，确保 MediaProjection 有效）
+        try {
+            val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+            val proj = mpm.getMediaProjection(resultCode, projectionData!!)
+            captureHelper = ScreenCaptureHelper(this)
+            captureHelper?.start(proj)
+        } catch (e: Exception) {
+            android.util.Log.e(Config.TAG, "启动截屏失败", e)
+            Toast.makeText(this, "启动截屏失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         showFloatingView()
     }
 
@@ -212,6 +227,7 @@ class MainActivity : AppCompatActivity() {
             onFinishAll = {
                 floatingView?.dismiss()
                 floatingView = null
+                stopCaptureHelper()
                 isCapturing = false
                 Toast.makeText(this, "模板采集完成！", Toast.LENGTH_LONG).show()
             }
@@ -224,38 +240,31 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
-                val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                val proj = mpm.getMediaProjection(resultCode, projectionData!!)
-                val helper = ScreenCaptureHelper(this)
-                helper.start(proj)
-                Thread.sleep(300)
                 var bmp: Bitmap? = null
-                for (i in 0..5) {
-                    bmp = helper.captureScreen()
+                for (i in 0..10) {
+                    bmp = captureHelper?.captureScreen()
                     if (bmp != null) break
-                    Thread.sleep(200)
+                    Thread.sleep(300)
                 }
-                helper.stop()
 
                 if (bmp != null) {
                     val file = File(cacheDir, "capture_temp.png")
                     FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
                     bmp.recycle()
 
-                    // 设置待裁剪标记，通知用户回到 App
                     pendingCropName = name
                     pendingCropPath = file.absolutePath
                     showCaptureNotification()
                 } else {
                     runOnUiThread {
-                        Toast.makeText(this@MainActivity, "截图失败", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "截图失败（无法获取画面）", Toast.LENGTH_SHORT).show()
                         showFloatingView()
                     }
                 }
             } catch (e: Exception) {
                 android.util.Log.e(Config.TAG, "截图失败", e)
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "截图失败", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "截图失败: ${e.message}", Toast.LENGTH_SHORT).show()
                     showFloatingView()
                 }
             }
@@ -273,11 +282,17 @@ class MainActivity : AppCompatActivity() {
         nm.notify(1002, notification)
     }
 
+    private fun stopCaptureHelper() {
+        try { captureHelper?.stop() } catch (_: Exception) {}
+        captureHelper = null
+    }
+
     private fun advanceToNextTemplate() {
         captureIndex++
         if (captureIndex < Config.TEMPLATE_NAMES.size) {
             showFloatingView()
         } else {
+            stopCaptureHelper()
             isCapturing = false
             Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
         }
