@@ -205,36 +205,44 @@ class MainActivity : AppCompatActivity() {
         floatingView?.dismiss()
         floatingView = null
 
-        // 截图：游戏仍在最前台，直接截取屏幕
-        val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-        val proj = mpm.getMediaProjection(resultCode, projectionData!!)
-        val helper = ScreenCaptureHelper(this)
-        helper.start(proj)
-        Thread.sleep(300)
-        var bmp: Bitmap? = null
-        for (i in 0..5) {
-            bmp = helper.captureScreen()
-            if (bmp != null) break
-            Thread.sleep(200)
-        }
-        helper.stop()
+        Thread {
+            try {
+                val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+                val proj = mpm.getMediaProjection(resultCode, projectionData!!)
+                val helper = ScreenCaptureHelper(this)
+                helper.start(proj)
+                Thread.sleep(300)
+                var bmp: Bitmap? = null
+                for (i in 0..5) {
+                    bmp = helper.captureScreen()
+                    if (bmp != null) break
+                    Thread.sleep(200)
+                }
+                helper.stop()
 
-        if (bmp == null) {
-            Toast.makeText(this, "截图失败，重试", Toast.LENGTH_SHORT).show()
-            showFloatingView()
-            return
-        }
-
-        // 保存到缓存，传给裁剪页面
-        val file = File(cacheDir, "capture_temp.png")
-        FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
-        bmp.recycle()
-
-        val intent = Intent(this, CropActivity::class.java).apply {
-            putExtra("imagePath", file.absolutePath)
-            putExtra("templateName", name)
-        }
-        cropResultLauncher.launch(intent)
+                runOnUiThread {
+                    if (bmp != null) {
+                        val file = File(cacheDir, "capture_temp.png")
+                        FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+                        bmp.recycle()
+                        val intent = Intent(this@MainActivity, CropActivity::class.java).apply {
+                            putExtra("imagePath", file.absolutePath)
+                            putExtra("templateName", name)
+                        }
+                        cropResultLauncher.launch(intent)
+                    } else {
+                        Toast.makeText(this@MainActivity, "截图失败", Toast.LENGTH_SHORT).show()
+                        showFloatingView()
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(Config.TAG, "截图失败", e)
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "截图失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    showFloatingView()
+                }
+            }
+        }.start()
     }
 
     private fun advanceToNextTemplate() {
