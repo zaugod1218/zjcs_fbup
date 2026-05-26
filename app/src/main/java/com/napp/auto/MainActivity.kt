@@ -1,6 +1,8 @@
 package com.napp.auto
 
 import android.app.AlertDialog
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -20,6 +22,12 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        var pendingCropName: String? = null
+        var pendingCropPath: String? = null
+        var templateJustSaved = false
+    }
 
     private lateinit var statusText: TextView
     private lateinit var cycleText: TextView
@@ -52,18 +60,6 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             Toast.makeText(this, "需要截屏权限才能运行", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private val cropResultLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            advanceToNextTemplate()
-        } else {
-            if (isCapturing && captureIndex < Config.TEMPLATE_NAMES.size) {
-                showFloatingView()
-            }
         }
     }
 
@@ -100,6 +96,27 @@ class MainActivity : AppCompatActivity() {
                 }
                 .setNegativeButton("稍后", null)
                 .show()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从 CropActivity 返回，模板已保存
+        if (templateJustSaved) {
+            templateJustSaved = false
+            advanceToNextTemplate()
+            return
+        }
+        // 有等待裁剪的截图（用户手动回到 App）
+        if (pendingCropName != null && pendingCropPath != null) {
+            val name = pendingCropName!!
+            val path = pendingCropPath!!
+            pendingCropName = null
+            pendingCropPath = null
+            startActivity(Intent(this, CropActivity::class.java).apply {
+                putExtra("imagePath", path)
+                putExtra("templateName", name)
+            })
         }
     }
 
@@ -150,7 +167,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // 检查悬浮窗权限（在游戏上方显示截图按钮）
+        // 悬浮窗权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             AlertDialog.Builder(this)
                 .setTitle("需要悬浮窗权限")
@@ -180,8 +197,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showFloatingView() {
         if (captureIndex >= Config.TEMPLATE_NAMES.size) {
-            Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
             isCapturing = false
+            Toast.makeText(this, "所有模板采集完成！", Toast.LENGTH_LONG).show()
             return
         }
         val name = Config.TEMPLATE_NAMES[captureIndex]
@@ -220,17 +237,17 @@ class MainActivity : AppCompatActivity() {
                 }
                 helper.stop()
 
-                runOnUiThread {
-                    if (bmp != null) {
-                        val file = File(cacheDir, "capture_temp.png")
-                        FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
-                        bmp.recycle()
-                        val intent = Intent(this@MainActivity, CropActivity::class.java).apply {
-                            putExtra("imagePath", file.absolutePath)
-                            putExtra("templateName", name)
-                        }
-                        cropResultLauncher.launch(intent)
-                    } else {
+                if (bmp != null) {
+                    val file = File(cacheDir, "capture_temp.png")
+                    FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+                    bmp.recycle()
+
+                    // 设置待裁剪标记，通知用户回到 App
+                    pendingCropName = name
+                    pendingCropPath = file.absolutePath
+                    showCaptureNotification()
+                } else {
+                    runOnUiThread {
                         Toast.makeText(this@MainActivity, "截图失败", Toast.LENGTH_SHORT).show()
                         showFloatingView()
                     }
@@ -238,11 +255,22 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 android.util.Log.e(Config.TAG, "截图失败", e)
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "截图失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "截图失败", Toast.LENGTH_SHORT).show()
                     showFloatingView()
                 }
             }
         }.start()
+    }
+
+    private fun showCaptureNotification() {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val notification = Notification.Builder(this, "napp_auto")
+            .setContentTitle("截图完成")
+            .setContentText("返回 NappAuto 选择按钮位置")
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setAutoCancel(true)
+            .build()
+        nm.notify(1002, notification)
     }
 
     private fun advanceToNextTemplate() {

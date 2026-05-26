@@ -67,7 +67,7 @@ class CropActivity : AppCompatActivity() {
                 template.recycle()
 
                 Toast.makeText(this, "模板 $templateName 已保存!", Toast.LENGTH_SHORT).show()
-                setResult(RESULT_OK)
+                MainActivity.templateJustSaved = true
                 finish()
             }
             true
