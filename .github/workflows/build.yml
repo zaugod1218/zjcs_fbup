@@ -21,9 +21,17 @@ jobs:
         run: |
           curl -sL "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -o gradle.zip
           unzip -q gradle.zip
-          gradle-8.5/bin/gradle assembleDebug
+          gradle-8.5/bin/gradle assembleDebug --stacktrace 2>&1 | tee build.log
+
+      - name: Upload Build Log (even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
